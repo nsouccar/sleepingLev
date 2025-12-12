@@ -1,0 +1,1 @@
+print("HELLO_FROM_BLENDER_SCRIPT")
