@@ -1,0 +1,135 @@
+{
+  "armature_name": "Armature",
+  "root": {
+    "name": "root",
+    "chain": [
+      "Hips"
+    ],
+    "confidence": 1.0,
+    "side": null,
+    "notes": [
+      "Root bone: Hips, 4 children"
+    ]
+  },
+  "chest": {
+    "name": "chest",
+    "chain": [
+      "chest"
+    ],
+    "confidence": 1.0,
+    "side": null,
+    "notes": [
+      "Hub with 3 children"
+    ]
+  },
+  "tail": {
+    "name": "tail",
+    "chain": [
+      "tail",
+      "tailstart",
+      "tail1",
+      "tail2",
+      "tail3"
+    ],
+    "confidence": 1.0,
+    "side": null,
+    "notes": [
+      "5 bones"
+    ]
+  },
+  "head": {
+    "name": "head",
+    "chain": [
+      "head",
+      "headend"
+    ],
+    "confidence": 1.0,
+    "side": null,
+    "notes": [
+      "2 bones"
+    ]
+  },
+  "legs": [
+    {
+      "name": "front_L",
+      "chain": [
+        "frontleg",
+        "frontleg0",
+        "frontleg1",
+        "frontleg2"
+      ],
+      "confidence": 0.8999999999999999,
+      "side": "L",
+      "notes": [
+        "front leg, 4 bones"
+      ]
+    },
+    {
+      "name": "front_R",
+      "chain": [
+        "R_frontleg",
+        "R_frontleg0",
+        "R_frontleg1",
+        "R_frontleg2"
+      ],
+      "confidence": 0.8999999999999999,
+      "side": "R",
+      "notes": [
+        "front leg, 4 bones"
+      ]
+    },
+    {
+      "name": "back_L",
+      "chain": [
+        "backleg",
+        "backleg0",
+        "backleg1",
+        "backleg2"
+      ],
+      "confidence": 0.8999999999999999,
+      "side": "L",
+      "notes": [
+        "back leg, 4 bones"
+      ]
+    },
+    {
+      "name": "back_R",
+      "chain": [
+        "R_backleg",
+        "R_backleg0",
+        "R_backleg1",
+        "R_backleg2"
+      ],
+      "confidence": 0.8999999999999999,
+      "side": "R",
+      "notes": [
+        "back leg, 4 bones"
+      ]
+    }
+  ],
+  "axes": {
+    "up": [
+      -0.1894642073085912,
+      0.6112393400990906,
+      -0.7684333303964342
+    ],
+    "forward": [
+      0.9562319026508559,
+      -0.0628692980309176,
+      -0.285776135668855
+    ],
+    "right": [
+      -0.22298848064788312,
+      -0.7889448145975281,
+      -0.5725750754425316
+    ],
+    "confidence": 0.8999999999999999
+  },
+  "warnings": [],
+  "summary": {
+    "leg_count": 4,
+    "has_tail": true,
+    "has_head": true,
+    "has_chest": true
+  }
+}
