@@ -226,6 +226,8 @@ def rotate_bone_world_axis(pose_bone, world_axis: Vector, degrees: float):
     Rotate a pose bone around a world-space axis.
     Converts to bone-local space first.
     """
+    from mathutils import Matrix
+
     radians = math.radians(degrees)
 
     # Get bone's world matrix
@@ -238,21 +240,19 @@ def rotate_bone_world_axis(pose_bone, world_axis: Vector, degrees: float):
 
     # Create rotation quaternion around local axis
     rot_quat = Quaternion(bone_local_axis, radians)
+    rot_matrix = rot_quat.to_matrix().to_4x4()
 
-    # Apply to current rotation
-    if pose_bone.rotation_mode == 'QUATERNION':
-        pose_bone.rotation_quaternion = rot_quat @ pose_bone.rotation_quaternion
-    else:
-        current_quat = pose_bone.rotation_euler.to_quaternion()
-        new_quat = rot_quat @ current_quat
-        pose_bone.rotation_euler = new_quat.to_euler(pose_bone.rotation_mode)
+    # Apply rotation by multiplying with current matrix
+    pose_bone.matrix_basis = pose_bone.matrix_basis @ rot_matrix
+
+    print(f"    DEBUG: {pose_bone.name} rotated {degrees:.1f}° around world axis")
 
 
 # =============================================================================
 # Sleep pose application
 # =============================================================================
 
-def apply_chest_pose(arm_obj, parts: dict, intensity: float, side: str):
+def apply_chest_pose(arm_obj, parts: dict, intensity: float, side: str, axes: dict):
     """Apply settling rotation to chest"""
     chest_data = parts.get("chest")
     if not chest_data:
@@ -269,20 +269,14 @@ def apply_chest_pose(arm_obj, parts: dict, intensity: float, side: str):
         print(f"  Chest bone '{chest_bone_name}' not found in pose bones")
         return
 
-    # Pitch chest down slightly (animal settling)
-    pitch_deg = -8.0 * intensity
+    # Use local bone rotation - small test value
+    rotate_bone_local(pose_bone, 'X', -8.0 * intensity)
 
-    # Roll toward sleep side
-    roll_deg = 5.0 * intensity if side == "right" else -5.0 * intensity
-
-    rotate_bone_local(pose_bone, 'X', pitch_deg)
-    rotate_bone_local(pose_bone, 'Y', roll_deg)
-
-    print(f"  Chest '{chest_bone_name}': pitch {pitch_deg:.1f}°, roll {roll_deg:.1f}°")
+    print(f"  Chest '{chest_bone_name}': rotated -8° around local X")
 
 
-def apply_hips_pose(arm_obj, parts: dict, intensity: float, side: str):
-    """Apply counter-rotation to hips/root"""
+def apply_hips_pose(arm_obj, parts: dict, intensity: float, side: str, axes: dict):
+    """Apply rotation to hips"""
     root_data = parts.get("root")
     if not root_data:
         return
@@ -297,20 +291,14 @@ def apply_hips_pose(arm_obj, parts: dict, intensity: float, side: str):
         print(f"  Root bone '{root_bone_name}' not found in pose bones")
         return
 
-    # Slight counter-pitch to chest
-    pitch_deg = 3.0 * intensity
+    # Use local bone rotation - small test value
+    rotate_bone_local(pose_bone, 'X', -5.0 * intensity)
 
-    # Roll toward sleep side (less than chest)
-    roll_deg = 3.0 * intensity if side == "right" else -3.0 * intensity
-
-    rotate_bone_local(pose_bone, 'X', pitch_deg)
-    rotate_bone_local(pose_bone, 'Y', roll_deg)
-
-    print(f"  Hips '{root_bone_name}': pitch {pitch_deg:.1f}°, roll {roll_deg:.1f}°")
+    print(f"  Hips '{root_bone_name}': rotated -5° around local X")
 
 
-def apply_head_pose(arm_obj, parts: dict, intensity: float, side: str):
-    """Apply head tuck - down and slightly to the side"""
+def apply_head_pose(arm_obj, parts: dict, intensity: float, side: str, axes: dict):
+    """Apply head pose - resting down"""
     head_data = parts.get("head")
     if not head_data:
         print("  No head detected, skipping head pose")
@@ -320,29 +308,24 @@ def apply_head_pose(arm_obj, parts: dict, intensity: float, side: str):
     if not chain:
         return
 
-    # Apply progressive rotation down the head chain
+    # Apply rotation to head bones
     for i, bone_name in enumerate(chain):
         pose_bone = arm_obj.pose.bones.get(bone_name)
         if not pose_bone:
             continue
 
-        # First bone gets most rotation, distribute along chain
-        factor = 1.0 - (i / max(len(chain), 1)) * 0.5
+        # First bone gets most rotation
+        factor = 1.0 - (i / max(len(chain), 1)) * 0.3
 
-        # Pitch down (tuck chin)
+        # Head down - local X rotation
         pitch_deg = -15.0 * intensity * factor
-
-        # Turn head toward sleep side
-        yaw_deg = 10.0 * intensity * factor if side == "right" else -10.0 * intensity * factor
-
         rotate_bone_local(pose_bone, 'X', pitch_deg)
-        rotate_bone_local(pose_bone, 'Z', yaw_deg)
 
-        print(f"  Head '{bone_name}': pitch {pitch_deg:.1f}°, yaw {yaw_deg:.1f}°")
+        print(f"  Head '{bone_name}': rotated {pitch_deg:.1f}° around local X")
 
 
-def apply_tail_pose(arm_obj, parts: dict, intensity: float, side: str):
-    """Apply gentle curl to tail"""
+def apply_tail_pose(arm_obj, parts: dict, intensity: float, side: str, axes: dict):
+    """Apply gentle droop to tail"""
     tail_data = parts.get("tail")
     if not tail_data:
         print("  No tail detected, skipping tail pose")
@@ -352,34 +335,24 @@ def apply_tail_pose(arm_obj, parts: dict, intensity: float, side: str):
     if not chain:
         return
 
-    # Curl tail progressively
+    # Droop tail progressively
     for i, bone_name in enumerate(chain):
         pose_bone = arm_obj.pose.bones.get(bone_name)
         if not pose_bone:
             continue
 
-        # Progressive curl - more toward the tip
         progress = i / max(len(chain) - 1, 1)
 
-        # Curl inward (toward body)
-        curl_deg = 8.0 * intensity * (0.5 + progress * 0.5)
+        # Tail droop - local X rotation
+        droop_deg = -8.0 * intensity * progress
+        rotate_bone_local(pose_bone, 'X', droop_deg)
 
-        # Curl direction based on sleep side
-        if side == "right":
-            rotate_bone_local(pose_bone, 'Z', curl_deg)
-        else:
-            rotate_bone_local(pose_bone, 'Z', -curl_deg)
-
-        # Slight downward curve
-        rotate_bone_local(pose_bone, 'X', -3.0 * intensity * progress)
-
-        print(f"  Tail '{bone_name}': curl {curl_deg:.1f}°")
+        print(f"  Tail '{bone_name}': rotated {droop_deg:.1f}° around local X")
 
 
-def apply_leg_pose(arm_obj, leg_data: dict, intensity: float, is_front: bool, side: str):
+def apply_leg_pose(arm_obj, leg_data: dict, intensity: float, is_front: bool, side: str, axes: dict):
     """
-    Apply folded pose to a single leg.
-    Front legs fold forward/under, back legs fold backward/under.
+    Apply sleeping pose to legs using local bone rotation.
     """
     chain = leg_data.get("chain", [])
     leg_side = leg_data.get("side", "")
@@ -388,61 +361,38 @@ def apply_leg_pose(arm_obj, leg_data: dict, intensity: float, is_front: bool, si
     if not chain:
         return
 
-    # Determine if this leg is on the "down" side (against the ground)
-    is_down_side = (side == "right" and leg_side == "R") or \
-                   (side == "left" and leg_side == "L")
-
     for i, bone_name in enumerate(chain):
         pose_bone = arm_obj.pose.bones.get(bone_name)
         if not pose_bone:
             continue
 
-        # Progress along leg (0 = hip, 1 = foot)
-        progress = i / max(len(chain) - 1, 1)
-
         if is_front:
-            # Front legs: fold backward (under body)
-            # First joint bends back, second forward, etc. (alternating)
+            # Front legs: fold forward and down
             if i == 0:
-                # Upper leg - rotate back
-                fold_deg = -25.0 * intensity
+                pitch_deg = -20.0 * intensity  # Shoulder forward
             elif i == 1:
-                # Middle joint - rotate forward (knee bend)
-                fold_deg = 45.0 * intensity
+                pitch_deg = 25.0 * intensity   # Elbow bent
             elif i == 2:
-                # Lower joint - straighten a bit
-                fold_deg = -20.0 * intensity
+                pitch_deg = -10.0 * intensity  # Paw
             else:
-                fold_deg = 0
+                pitch_deg = 0
         else:
-            # Back legs: similar fold pattern
+            # Back legs: tuck under
             if i == 0:
-                # Upper leg - rotate forward
-                fold_deg = 20.0 * intensity
+                pitch_deg = -15.0 * intensity  # Hip forward
             elif i == 1:
-                # Middle joint - rotate back (knee bend)
-                fold_deg = -50.0 * intensity
+                pitch_deg = 30.0 * intensity   # Knee bent
             elif i == 2:
-                # Lower joint
-                fold_deg = 30.0 * intensity
+                pitch_deg = -20.0 * intensity  # Lower leg
             else:
-                fold_deg = 0
+                pitch_deg = 0
 
-        # Down-side legs are more tucked
-        if is_down_side:
-            fold_deg *= 1.2
+        rotate_bone_local(pose_bone, 'X', pitch_deg)
 
-        rotate_bone_local(pose_bone, 'X', fold_deg)
-
-        # Slight inward rotation for tucked legs
-        if is_down_side and i == 0:
-            inward_deg = 10.0 * intensity if leg_side == "R" else -10.0 * intensity
-            rotate_bone_local(pose_bone, 'Z', inward_deg)
-
-    print(f"  Leg '{leg_name}': folded ({'down-side' if is_down_side else 'up-side'})")
+    print(f"  Leg '{leg_name}': posed (local X rotation)")
 
 
-def apply_legs_pose(arm_obj, parts: dict, intensity: float, side: str):
+def apply_legs_pose(arm_obj, parts: dict, intensity: float, side: str, axes: dict):
     """Apply folded pose to all legs"""
     legs = parts.get("legs", [])
     if not legs:
@@ -452,12 +402,17 @@ def apply_legs_pose(arm_obj, parts: dict, intensity: float, side: str):
     for leg_data in legs:
         leg_name = leg_data.get("name", "")
         is_front = "front" in leg_name.lower()
-        apply_leg_pose(arm_obj, leg_data, intensity, is_front, side)
+        apply_leg_pose(arm_obj, leg_data, intensity, is_front, side, axes)
 
 
 def apply_sleep_pose(arm_obj, parts: dict, intensity: float, side: str):
-    """Apply complete sleep pose to armature"""
+    """Apply complete sleep pose to armature using world axes"""
     print(f"\nApplying sleep pose (intensity={intensity}, side={side})")
+
+    # Use standard Blender axes (ignore detected axes which seem wrong)
+    # Blender convention: Z=up, Y=forward, X=right
+    axes = {"up": [0, 0, 1], "forward": [0, 1, 0], "right": [1, 0, 0]}
+    print(f"  Using standard Blender axes: Z=up, Y=forward, X=right")
 
     # Ensure we're in pose mode
     bpy.context.view_layer.objects.active = arm_obj
@@ -468,17 +423,17 @@ def apply_sleep_pose(arm_obj, parts: dict, intensity: float, side: str):
     bpy.ops.pose.transforms_clear()
 
     print("\nPosing body:")
-    apply_hips_pose(arm_obj, parts, intensity, side)
-    apply_chest_pose(arm_obj, parts, intensity, side)
+    apply_hips_pose(arm_obj, parts, intensity, side, axes)
+    apply_chest_pose(arm_obj, parts, intensity, side, axes)
 
     print("\nPosing head:")
-    apply_head_pose(arm_obj, parts, intensity, side)
+    apply_head_pose(arm_obj, parts, intensity, side, axes)
 
     print("\nPosing tail:")
-    apply_tail_pose(arm_obj, parts, intensity, side)
+    apply_tail_pose(arm_obj, parts, intensity, side, axes)
 
     print("\nPosing legs:")
-    apply_legs_pose(arm_obj, parts, intensity, side)
+    apply_legs_pose(arm_obj, parts, intensity, side, axes)
 
     # Bake pose as keyframes so it exports in glTF
     bake_pose_as_action(arm_obj, "sleep_pose")

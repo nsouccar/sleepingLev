@@ -1,45 +1,48 @@
-# meshy_inspect.py
+# meshy_mesh_plus_bones.py
 #
-# Usage (UI run, recommended for saving a nice skeleton-only .blend with viewport set):
-#   /Applications/Blender.app/Contents/MacOS/Blender --python "$(pwd)/meshy_inspect.py" -- \
+# Creates a “Mesh + Big Green Bone Shapes” debug .blend (similar to your screenshot).
+# - Imports a GLB
+# - Finds the first armature
+# - Keeps the mesh visible
+# - Assigns a bright green pyramid-ish custom shape to EVERY bone (so bones are easy to see)
+# - Saves a .blend (and optionally a rig_report.json)
+#
+# Recommended (UI run so the viewport can be framed nicely):
+#   /Applications/Blender.app/Contents/MacOS/Blender --python "$(pwd)/meshy_mesh_plus_bones.py" -- \
 #     --in "$(pwd)/Character_output.glb" \
-#     --out-blend "$(pwd)/out/skeleton_only.blend" \
+#     --out-blend "$(pwd)/out/mesh_plus_bones.blend" \
 #     --report "$(pwd)/out/rig_report.json"
 #
-# Usage (headless run, writes report + .blend, but viewport config may not “stick”):
+# Headless also works (but viewport framing may not apply):
 #   /Applications/Blender.app/Contents/MacOS/Blender --background --python-exit-code 1 --debug-python \
-#     --python "$(pwd)/meshy_inspect.py" -- \
+#     --python "$(pwd)/meshy_mesh_plus_bones.py" -- \
 #     --in "$(pwd)/Character_output.glb" \
-#     --out-blend "$(pwd)/out/skeleton_only.blend" \
-#     --report "$(pwd)/out/rig_report.json"
+#     --out-blend "$(pwd)/out/mesh_plus_bones.blend"
 
 import bpy
 import sys
 import os
+import json
+import math
 import argparse
 import addon_utils
-import json
-from itertools import groupby
 
-print("MESHY_INSPECT_LOADED __name__ =", __name__)
+print("SCRIPT_LOADED __name__ =", __name__)
 
 # ----------------------------
-# Setup / IO
+# Args / IO
 # ----------------------------
 
-def enable_gltf_importer():
-    """Ensure the glTF importer exists even when running with --factory-startup."""
-    try:
-        bpy.ops.preferences.addon_enable(module="io_scene_gltf2")
-    except Exception:
-        addon_utils.enable("io_scene_gltf2", default_set=True, persistent=True)
-
-def clear_scene():
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.object.delete(use_global=False)
-
-def import_glb(path: str):
-    bpy.ops.import_scene.gltf(filepath=path)
+def parse_args():
+    argv = sys.argv
+    argv = argv[argv.index("--") + 1:] if "--" in argv else []
+    p = argparse.ArgumentParser()
+    p.add_argument("--in", dest="in_path", required=True, help="Input .glb file path")
+    p.add_argument("--out-blend", required=True, help="Output .blend file path")
+    p.add_argument("--report", default="", help="Optional output rig_report.json path")
+    p.add_argument("--shape-scale", type=float, default=0.25, help="Thickness of the green bone shapes")
+    p.add_argument("--emission", type=float, default=3.0, help="Emission strength for green shapes")
+    return p.parse_args(argv)
 
 def save_blend(path: str):
     d = os.path.dirname(path)
@@ -54,93 +57,33 @@ def save_json(path: str, data):
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
-def parse_args():
-    argv = sys.argv
-    argv = argv[argv.index("--") + 1:] if "--" in argv else []
-    p = argparse.ArgumentParser()
-    p.add_argument("--in", dest="in_path", required=True, help="Input .glb file path")
-    p.add_argument("--out-blend", required=True, help="Output .blend file path")
-    p.add_argument("--report", default="", help="Optional: output rig_report.json path")
-    return p.parse_args(argv)
+# ----------------------------
+# Blender setup / import
+# ----------------------------
 
-# ----------------------------
-# Armature helpers
-# ----------------------------
+def enable_gltf_importer():
+    # Makes GLB import work even with --factory-startup.
+    try:
+        bpy.ops.preferences.addon_enable(module="io_scene_gltf2")
+    except Exception:
+        addon_utils.enable("io_scene_gltf2", default_set=True, persistent=True)
+
+def clear_scene():
+    bpy.ops.object.select_all(action="SELECT")
+    bpy.ops.object.delete(use_global=False)
+
+def import_glb(path: str):
+    bpy.ops.import_scene.gltf(filepath=path)
 
 def find_first_armature():
     for obj in bpy.context.scene.objects:
-        if obj.type == 'ARMATURE':
+        if obj.type == "ARMATURE":
             return obj
     return None
 
-def delete_everything_except(obj_to_keep):
-    bpy.ops.object.select_all(action='DESELECT')
-    for obj in list(bpy.context.scene.objects):
-        if obj != obj_to_keep:
-            obj.select_set(True)
-    bpy.ops.object.delete()
-
-def force_all_bones_visible(arm_obj):
-    # Unhide bones
-    for b in arm_obj.data.bones:
-        b.hide = False
-
-    # Blender 4/5 Bone Collections can hide everything
-    arm_data = arm_obj.data
-    if hasattr(arm_data, "collections_all"):
-        cols = list(arm_data.collections_all)
-    elif hasattr(arm_data, "collections"):
-        cols = list(arm_data.collections)
-    else:
-        cols = []
-
-    for c in cols:
-        if hasattr(c, "is_visible"):
-            c.is_visible = True
-        if hasattr(c, "is_solo"):
-            c.is_solo = False
-
-def clear_custom_shapes(arm_obj):
-    # Clear custom shapes (often spheres/controllers)
-    if not getattr(arm_obj, "pose", None):
-        return
-    for pb in arm_obj.pose.bones:
-        pb.custom_shape = None
-
-def configure_armature_draw(arm_obj):
-    # ----- OBJECT-LEVEL draw (can cause the "bounds sphere" look) -----
-    if hasattr(arm_obj, "show_bounds"):
-        arm_obj.show_bounds = False
-    if hasattr(arm_obj, "display_bounds_type"):
-        arm_obj.display_bounds_type = 'BOX'
-    if hasattr(arm_obj, "display_type"):
-        arm_obj.display_type = 'WIRE'  # avoid BOUNDS
-
-    # ----- ARMATURE/BONE draw -----
-    arm_obj.show_in_front = True
-
-    # Set bone display type - STICK is simplest and most readable
-    # Valid options: 'OCTAHEDRAL', 'STICK', 'BBONE', 'ENVELOPE', 'WIRE'
-    arm_data = arm_obj.data
-    if hasattr(arm_data, "display_type"):
-        try:
-            arm_data.display_type = 'STICK'
-        except Exception as e:
-            print(f"Could not set display_type to STICK: {e}")
-
-    # Disable envelope display (the circles you see)
-    if hasattr(arm_data, "show_bone_envelopes"):
-        arm_data.show_bone_envelopes = False
-
-    # Blender 5.0 might use different attribute names
-    if hasattr(arm_data, "display_bone_envelopes"):
-        arm_data.display_bone_envelopes = False
-
-    # Debug prints
-    print("ARMATURE OBJECT display_type:", getattr(arm_obj, "display_type", None))
-    print("ARMATURE OBJECT show_bounds:", getattr(arm_obj, "show_bounds", None))
-    print("ARMATURE DATA display_type:", getattr(arm_data, "display_type", None))
-    print("ARMATURE DATA show_bone_envelopes:", getattr(arm_data, "show_bone_envelopes", None))
+# ----------------------------
+# Rig report (optional)
+# ----------------------------
 
 def rig_report(arm_obj):
     bones = arm_obj.data.bones
@@ -159,183 +102,146 @@ def rig_report(arm_obj):
     }
 
 # ----------------------------
-# Viewport config (UI runs only)
+# Custom-shape overlay (the “green wedges”)
 # ----------------------------
 
-def configure_first_viewport_to_show_bones(active_obj):
+def get_or_create_green_material(emission_strength: float):
+    mat_name = "__BONE_GREEN__"
+    mat = bpy.data.materials.get(mat_name)
+    if mat is None:
+        mat = bpy.data.materials.new(mat_name)
+        mat.use_nodes = True
+
+    # Configure nodes
+    nt = mat.node_tree
+    nodes = nt.nodes
+    bsdf = nodes.get("Principled BSDF")
+    if bsdf:
+        bsdf.inputs["Base Color"].default_value = (0.2, 1.0, 0.2, 1.0)
+        # Blender versions differ slightly in socket names, guard them:
+        if "Emission Color" in bsdf.inputs:
+            bsdf.inputs["Emission Color"].default_value = (0.2, 1.0, 0.2, 1.0)
+        if "Emission Strength" in bsdf.inputs:
+            bsdf.inputs["Emission Strength"].default_value = emission_strength
+        elif "Emission" in bsdf.inputs:
+            bsdf.inputs["Emission"].default_value = emission_strength
+
+    return mat
+
+def get_or_create_bone_shape(emission_strength: float):
     """
-    UI-only: make the first 3D viewport readable for rigs.
-    Uses Blender 3.2+ / 5.0 temp_override API.
-    Gracefully skips if running in background mode with no UI.
+    Creates a pyramid-ish mesh object used as a custom bone shape.
+    We move it far away so it doesn't clutter the scene as a standalone object.
     """
-    # Check if we're in background mode
-    if bpy.app.background:
-        print("Background mode detected -> skipping viewport framing (overlay settings still applied to data)")
-        # We can still set armature data properties that persist in the .blend
+    shape_name = "__BONE_SHAPE_PYRAMID__"
+    shape_obj = bpy.data.objects.get(shape_name)
+    if shape_obj is not None:
+        return shape_obj
+
+    # Create a pyramid-like cone (4 vertices)
+    bpy.ops.mesh.primitive_cone_add(vertices=4, radius1=0.10, depth=1.0)
+    shape_obj = bpy.context.active_object
+    shape_obj.name = shape_name
+
+    # Point along +Y (bones generally point +Y in pose space display)
+    shape_obj.rotation_euler = (math.radians(90), 0, 0)
+
+    # Bright green material
+    mat = get_or_create_green_material(emission_strength)
+    if shape_obj.data.materials:
+        shape_obj.data.materials[0] = mat
+    else:
+        shape_obj.data.materials.append(mat)
+
+    # Don’t render it; keep it “out of the way”
+    shape_obj.hide_render = True
+    shape_obj.hide_select = True
+    shape_obj.location = (10000, 10000, 10000)
+
+    return shape_obj
+
+def apply_green_shapes_to_bones(arm_obj, shape_scale: float, emission_strength: float):
+    shape_obj = get_or_create_bone_shape(emission_strength)
+
+    # Ensure we have pose bones loaded
+    if not getattr(arm_obj, "pose", None) or not arm_obj.pose.bones:
+        bpy.context.view_layer.objects.active = arm_obj
+        arm_obj.select_set(True)
         try:
-            active_obj.data.display_type = 'STICK'
+            bpy.ops.object.mode_set(mode="POSE")
+            bpy.ops.object.mode_set(mode="OBJECT")
         except Exception:
             pass
-        return
 
+    # Assign shape to each pose bone
+    for pb in arm_obj.pose.bones:
+        pb.custom_shape = shape_obj
+
+        # Make it proportional: longer bone -> longer wedge
+        L = max(pb.bone.length, 1e-4)
+        pb.custom_shape_scale_xyz = (shape_scale, L, shape_scale)
+
+    # Make armature draw on top of mesh
+    arm_obj.show_in_front = True
+
+    # If Blender tries to show “bounds sphere”, disable that
+    if hasattr(arm_obj, "show_bounds"):
+        arm_obj.show_bounds = False
+    if hasattr(arm_obj, "display_type"):
+        arm_obj.display_type = "SOLID"
+
+# ----------------------------
+# Viewport setup (UI-only)
+# ----------------------------
+
+def configure_viewport_ui(active_obj):
+    """
+    UI-only: set the first 3D View to something readable and frame the selection.
+    Blender 5+ safe (uses context.temp_override).
+    """
     wm = bpy.context.window_manager
     if not getattr(wm, "windows", None) or len(wm.windows) == 0:
-        print("No UI windows -> skipping viewport config")
+        print("No UI windows (background mode) -> skipping viewport config")
         return
 
-    # Select and activate the armature
-    try:
-        bpy.ops.object.select_all(action='DESELECT')
-        active_obj.select_set(True)
-        bpy.context.view_layer.objects.active = active_obj
-    except Exception as e:
-        print(f"Could not select armature: {e}")
-
-    # Prefer stick for readability (persists in .blend)
-    try:
-        active_obj.data.display_type = 'STICK'
-    except Exception:
-        pass
+    # Make active/selected
+    bpy.ops.object.select_all(action="DESELECT")
+    active_obj.select_set(True)
+    bpy.context.view_layer.objects.active = active_obj
 
     for window in wm.windows:
         screen = window.screen
         for area in screen.areas:
-            if area.type != 'VIEW_3D':
+            if area.type != "VIEW_3D":
                 continue
 
-            region = next((r for r in area.regions if r.type == 'WINDOW'), None)
+            region = next((r for r in area.regions if r.type == "WINDOW"), None)
             if not region:
                 continue
 
             space = area.spaces.active
 
-            # Shading - SOLID reads better for bones
-            if hasattr(space, "shading") and hasattr(space.shading, "type"):
-                space.shading.type = 'SOLID'
+            # View settings
+            try:
+                space.shading.type = "MATERIAL"  # mesh looks nicer; bones still visible
+            except Exception:
+                pass
 
-            # Overlays
             ov = space.overlay
             if hasattr(ov, "show_overlays"):
                 ov.show_overlays = True
             if hasattr(ov, "show_relationship_lines"):
-                ov.show_relationship_lines = False  # Remove "swirly spaghetti"
+                ov.show_relationship_lines = False
 
-            # Bone names and axes (attribute names vary by version)
-            for attr in ("show_bone_names", "show_bones_names"):
-                if hasattr(ov, attr):
-                    setattr(ov, attr, True)
-                    break
-            for attr in ("show_bone_axes", "show_bones_axes"):
-                if hasattr(ov, attr):
-                    setattr(ov, attr, True)
-                    break
-
-            # Disable bone envelopes overlay (the circles around bones)
-            for attr in ("show_bone_envelopes", "show_bones_envelopes"):
-                if hasattr(ov, attr):
-                    setattr(ov, attr, False)
-                    break
-
-            # Frame the armature using Blender 3.2+ / 5.0 temp_override API
+            # Frame view
             try:
-                with bpy.context.temp_override(window=window, area=area, region=region):
+                with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
                     bpy.ops.view3d.view_selected()
-                print("Configured viewport (names+axes) + framed armature.")
+                print("Viewport configured + framed.")
             except Exception as e:
-                print(f"Could not frame viewport: {e}")
-                print("Viewport overlay settings applied, but framing skipped.")
+                print("Viewport frame skipped:", e)
 
             return
-
-    print("No VIEW_3D area found; viewport not configured.")
-
-
-# ----------------------------
-# Rig topology map (terminal output)
-# ----------------------------
-
-def print_rig_topology(arm_obj):
-    """
-    Print a topology-first rig map to help identify legs/tail/head without relying on names.
-    Shows: root bones, branching bones, and root-to-leaf chains sorted by length.
-    """
-    bones = arm_obj.data.bones
-    if not bones:
-        print("\n=== RIG TOPOLOGY MAP ===")
-        print("No bones found.")
-        return
-
-    # Build parent->children map
-    children_map = {}
-    for b in bones:
-        parent_name = b.parent.name if b.parent else None
-        if parent_name not in children_map:
-            children_map[parent_name] = []
-        children_map[parent_name].append(b.name)
-
-    # Find root bones (no parent)
-    roots = children_map.get(None, [])
-
-    # Find branching bones (>=2 children)
-    branching = [(name, len(children_map.get(name, [])))
-                 for name in children_map
-                 if name is not None and len(children_map.get(name, [])) >= 2]
-    branching.sort(key=lambda x: -x[1])  # Sort by child count descending
-
-    # Find leaf bones (no children)
-    all_parents = set(children_map.keys()) - {None}
-    all_bone_names = set(b.name for b in bones)
-    leaves = all_bone_names - all_parents
-
-    # Build chains from each root to each leaf
-    def trace_chain(bone_name, chain=None):
-        if chain is None:
-            chain = []
-        chain = chain + [bone_name]
-        kids = children_map.get(bone_name, [])
-        if not kids:
-            return [chain]
-        all_chains = []
-        for kid in kids:
-            all_chains.extend(trace_chain(kid, chain))
-        return all_chains
-
-    all_chains = []
-    for root in roots:
-        all_chains.extend(trace_chain(root))
-
-    # Sort chains by length (longest first)
-    all_chains.sort(key=lambda c: -len(c))
-
-    # Print report
-    print("\n" + "=" * 50)
-    print("RIG TOPOLOGY MAP")
-    print("=" * 50)
-
-    print(f"\nTotal bones: {len(bones)}")
-
-    print(f"\nRoot bones ({len(roots)}):")
-    for r in roots:
-        print(f"  • {r}")
-
-    print(f"\nBranching bones ({len(branching)}):")
-    for name, count in branching:
-        kids = children_map.get(name, [])
-        print(f"  • {name} -> {count} children: {kids}")
-
-    print(f"\nLeaf bones ({len(leaves)}):")
-    for leaf in sorted(leaves):
-        print(f"  • {leaf}")
-
-    print(f"\nRoot-to-leaf chains (sorted by length, {len(all_chains)} total):")
-    # Group chains by length for readability
-    for length, group in groupby(all_chains, key=len):
-        chains = list(group)
-        print(f"\n  Length {length} ({len(chains)} chain{'s' if len(chains) > 1 else ''}):")
-        for chain in chains:
-            print(f"    {' -> '.join(chain)}")
-
-    print("=" * 50 + "\n")
 
 # ----------------------------
 # Main
@@ -353,29 +259,27 @@ def main():
     if not arm:
         raise RuntimeError("No ARMATURE found in this file.")
 
-    # Clean/force skeleton-only
-    clear_custom_shapes(arm)
-    force_all_bones_visible(arm)
-    configure_armature_draw(arm)
-    delete_everything_except(arm)
+    # IMPORTANT: We KEEP the mesh (no delete_everything_except).
+    apply_green_shapes_to_bones(
+        arm_obj=arm,
+        shape_scale=args.shape_scale,
+        emission_strength=args.emission,
+    )
 
-    # Configure viewport (UI-only, gracefully skips in background mode)
-    try:
-        configure_first_viewport_to_show_bones(arm)
-    except Exception as e:
-        print(f"Viewport config failed (non-fatal): {e}")
-
-    # Print topology map to terminal (always runs)
-    print_rig_topology(arm)
-
-    # Optional rig report JSON
+    # Optional JSON report
     if args.report:
         save_json(args.report, rig_report(arm))
         print("Wrote report:", args.report)
+
+    # UI-only viewport help
+    try:
+        configure_viewport_ui(arm)
+    except Exception as e:
+        print("Viewport config failed (continuing):", e)
 
     save_blend(args.out_blend)
     print("Saved:", args.out_blend)
     print("Armature:", arm.name, "bones:", len(arm.data.bones))
 
-# NOTE: Call unconditionally (Blender sometimes doesn't set __name__ == "__main__")
+# Call unconditionally (Blender sometimes doesn't behave like standard __main__)
 main()
